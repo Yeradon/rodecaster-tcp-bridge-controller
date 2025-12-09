@@ -92,6 +92,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Store context from entry
     let mut current_ctx: Option<SyscallContext> = None;
 
+    // Deduplication state
+    let mut last_packet: Option<(String, Vec<u8>)> = None;
+    let mut repeat_count: usize = 0;
+
     loop {
         unsafe {
             ptrace(
@@ -138,7 +142,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 syscall_nr: sys_nr,
                                 fd: arg_fd,
                                 buf_addr: regs.regs[1],
-                                count: regs.regs[2], // For sendmsg/recvmsg this is msg *, not length. Length is inside structure.
+                                count: regs.regs[2],
                             });
                         } else {
                             current_ctx = None;
@@ -159,13 +163,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 };
 
                                 if ctx.syscall_nr == SYS_READV || ctx.syscall_nr == SYS_WRITEV {
+                                    if repeat_count > 0 {
+                                        println!("(Previous packet repeated {} times)", repeat_count);
+                                        repeat_count = 0;
+                                        last_packet = None;
+                                    }
                                     println!("{}: [IOVEC op: {} bytes]", direction, ret_val);
                                 } else if ctx.syscall_nr == SYS_SENDMSG || ctx.syscall_nr == SYS_RECVMSG {
+                                    if repeat_count > 0 {
+                                        println!("(Previous packet repeated {} times)", repeat_count);
+                                        repeat_count = 0;
+                                        last_packet = None;
+                                    }
                                     println!("{}: [MSG op: {} bytes]", direction, ret_val);
                                 } else {
-                                    // Normal buffer (read/write/sendto/recvfrom)
+                                    // Normal buffer
                                      if let Ok(data) = read_memory(pid, ctx.buf_addr, ret_val as usize) {
-                                        print_hex(direction, &data);
+                                        let current = (direction.to_string(), data.clone());
+                                        if let Some((last_dir, last_data)) = &last_packet {
+                                            if *last_dir == current.0 && *last_data == current.1 {
+                                                repeat_count += 1;
+                                            } else {
+                                                if repeat_count > 0 {
+                                                    println!("(Previous packet repeated {} times)", repeat_count);
+                                                }
+                                                print_hex(direction, &data);
+                                                last_packet = Some(current);
+                                                repeat_count = 0;
+                                            }
+                                        } else {
+                                             print_hex(direction, &data);
+                                             last_packet = Some(current);
+                                             repeat_count = 0;
+                                        }
                                     }
                                 }
                             }
@@ -228,20 +258,39 @@ fn read_memory(pid: pid_t, addr: u64, len: usize) -> Result<Vec<u8>, std::io::Er
 }
 
 fn print_hex(prefix: &str, data: &[u8]) {
-    print!("{}: ", prefix);
-    for b in data {
-        print!("{:02X}", b);
+    println!("{} ({} bytes):", prefix, data.len());
+    let width = 16;
+    for (i, chunk) in data.chunks(width).enumerate() {
+        print!("{:08x}  ", i * width);
+        
+        // Hex part
+        for (j, b) in chunk.iter().enumerate() {
+            print!("{:02x} ", b);
+            if j == 7 {
+                print!(" ");
+            }
+        }
+        
+        // Padding if last chunk is short
+        if chunk.len() < width {
+            let missing = width - chunk.len();
+            let spaces = missing * 3 + (if chunk.len() <= 8 { 1 } else { 0 });
+            for _ in 0..spaces {
+                print!(" ");
+            }
+        }
+        
+        print!(" |");
+        // ASCII part
+        for b in chunk {
+            if *b >= 32 && *b <= 126 {
+                print!("{}", *b as char);
+            } else {
+                print!(".");
+            }
+        }
+        println!("|");
     }
     println!();
-    // Also try to interpret printable chars
-    print!("ASCII: ");
-    for b in data {
-        if *b >= 32 && *b <= 126 {
-             print!("{}", *b as char);
-        } else {
-             print!(".");
-        }
-    }
-    println!("\n");
 }
 
