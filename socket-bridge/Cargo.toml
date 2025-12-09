@@ -7,3 +7,4 @@ edition = "2021"
 libc = "0.2"
 clap = { version = "4.4", features = ["derive"] }
 hex = "0.4"
+byteorder = "1.4"
