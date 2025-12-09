@@ -42,10 +42,23 @@ impl Injector {
             ptrace(PTRACE_SYSCALL, self.pid, ptr::null_mut::<c_void>(), ptr::null_mut::<c_void>());
             
             // 4. Wait for syscall exit
-            let mut status = 0;
-            waitpid(self.pid, &mut status, 0);
-            
-            // TODO: verify stop signal?
+            loop {
+                let mut status = 0;
+                waitpid(self.pid, &mut status, 0);
+                if WIFSTOPPED(status) {
+                    let sig = WSTOPSIG(status);
+                    if sig == (SIGTRAP | 0x80) {
+                        break; // Correct syscall stop
+                    }
+                    // If other signal (e.g. SIGCHLD), ignore and continue? 
+                    // Or pass it? For simple injection, we might swallow it or just wait again.
+                    // Ideally we should pass it, but we are inside an injection sequence.
+                    // Let's just continue waiting for the syscall stop.
+                     ptrace(PTRACE_SYSCALL, self.pid, ptr::null_mut::<c_void>(), ptr::null_mut::<c_void>());
+                } else if WIFEXITED(status) || WIFSIGNALED(status) {
+                    return Err(format!("Process exited during injection: {}", status));
+                }
+            }
             
             // 5. Restore original regs
             // IMPORTANT: We must rewind PC to retry the original syscall.

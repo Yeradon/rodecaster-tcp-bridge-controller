@@ -17,6 +17,8 @@ Pop-Location
 
 Write-Host "Deploying to $RemoteHost..."
 # Added -v for verbose to debug
-scp -v $LocalBin "$RemoteHost`:$RemotePath"
+scp -v socket-bridge/target/$Target/release/socket-bridge $RemoteHost`:$RemotePath
+scp -v socket-bridge/target/$Target/release/bridge-ctl $RemoteHost`:/tmp/bridge-ctl
+ssh $RemoteHost "chmod +x $RemotePath /tmp/bridge-ctl"
 
 Write-Host "Done."

@@ -44,11 +44,10 @@ pub fn build_channel_output_mute(fader_index: u8, mute: bool) -> Vec<u8> {
     // Captures showed: Fader 1 -> 0x22. 
     // Let's take fader_id as u8 directly.
     
-    let mut payload = vec![
-        0x01, 0x01, 0x01, 0x01, // Prefix
-    ];
-    
-    payload.push(fader_index); // Fader Char
+    // Fader mapping: 1 -> 0x22, 2 -> 0x23, etc.
+    // Base offset: 0x21 (33)
+    let fader_char = 0x21 + fader_index;
+    payload.push(fader_char);
     
     // "channelOutputMute" + null
     payload.extend_from_slice(b"channelOutputMute\0");
