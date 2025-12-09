@@ -1,3 +1,4 @@
+mod common;
 mod injector;
 mod listener;
 mod protocol;
@@ -7,14 +8,14 @@ use clap::Parser;
 use libc::{
     c_void, iovec, pid_t, ptrace, waitpid, PTRACE_ATTACH, PTRACE_DETACH, PTRACE_GETREGSET,
     PTRACE_O_TRACESYSGOOD, PTRACE_SETOPTIONS, PTRACE_SYSCALL, SIGTRAP, WIFEXITED, WIFSIGNALED,
-    WIFSTOPPED, WSTOPSIG,
+    WIFSTOPPED, WSTOPSIG, NT_PRSTATUS
 };
 use std::mem;
 use std::ptr;
 use std::sync::mpsc;
+use common::UserPtRegs;
 
 // AArch64 constants
-const NT_PRSTATUS: i32 = 1;
 const SYS_READ: u64 = 63;
 const SYS_WRITE: u64 = 64;
 const SYS_READV: u64 = 65;
@@ -23,15 +24,6 @@ const SYS_SENDTO: u64 = 206;
 const SYS_RECVFROM: u64 = 207;
 const SYS_SENDMSG: u64 = 211;
 const SYS_RECVMSG: u64 = 212;
-
-#[repr(C)]
-#[derive(Default, Debug, Clone, Copy)]
-struct UserPtRegs {
-    regs: [u64; 31],
-    sp: u64,
-    pc: u64,
-    pstate: u64,
-}
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -57,11 +49,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (tx, rx) = mpsc::channel();
     listener::start_listener(tx);
 
-    // Prepare Injector (direct FD write)
-    let mut injector = injector::Injector::new(pid, target_fd).map_err(|e| {
-        eprintln!("Warning: Failed to open injection FD (maybe not yet open?): {}", e);
-        e
-    }).ok();
+    // Prepare Injector (ptrace helper)
+    let injector = injector::Injector::new(pid, target_fd);
 
     println!("Attaching to PID: {}", pid);
     unsafe {
@@ -85,45 +74,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut sniffer_state = sniffer::SnifferState::new();
 
     loop {
-        // Before continuing, process any pending injection commands
-        // We only inject when we are paused (which we are now).
-        // Since we write to the FD directly, we don't need to hijack the current syscall.
-        // We just need to ensure the process is stopped so we don't race too badly 
-        // (though kernel handles socket write locking, doing it here is cleaner).
-        
-        while let Ok(cmd) = rx.try_recv() {
-            match cmd {
-                listener::Command::ChannelOutputMute { fader_index, mute } => {
-                    println!("[Bridge] Injecting Mute(fader={}, mute={})", fader_index, mute);
-                    let payload = protocol::build_channel_output_mute(fader_index, mute);
-                    let packet = protocol::Packet::new(payload);
-                    let bytes = packet.to_bytes();
-                    
-                    if let Some(inj) = &mut injector {
-                        if let Err(e) = inj.inject(&bytes) {
-                             eprintln!("[Bridge] Injection failed: {}", e);
-                        } else {
-                             println!("[Bridge] Injected {} bytes", bytes.len());
-                             // Log it as outgoing
-                             sniffer::print_hexdump("INJECTED", &bytes);
-                        }
-                    } else {
-                        // Try to reopen if it failed initially
-                        if let Ok(inj) = injector::Injector::new(pid, target_fd) {
-                             injector = Some(inj);
-                             // Retry once
-                             if let Some(inj) = &mut injector {
-                                 let _ = inj.inject(&bytes);
-                                 sniffer::print_hexdump("INJECTED", &bytes);
-                             }
-                        } else {
-                             eprintln!("[Bridge] Injection FD not available.");
-                        }
-                    }
-                }
-            }
-        }
-
         unsafe {
             ptrace(PTRACE_SYSCALL, pid, ptr::null_mut::<c_void>(), ptr::null_mut::<c_void>());
         }
@@ -140,8 +90,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if WIFSTOPPED(status) {
             let sig = WSTOPSIG(status);
             if sig == (SIGTRAP | 0x80) {
+                // Stopped at Syscall Entry or Exit
                 if !expect_syscall_exit {
                     // SYSCALL ENTRY
+                    // Check for injection
+                    if let Ok(cmd) = rx.try_recv() {
+                         match cmd {
+                             listener::Command::ChannelOutputMute { fader_index, mute } => {
+                                 println!("[Bridge] Preparing to inject Mute({}, {})", fader_index, mute);
+                                  if let Ok(regs) = get_regs(pid) {
+                                      let payload = protocol::build_channel_output_mute(fader_index, mute);
+                                      let packet = protocol::Packet::new(payload);
+                                      let bytes = packet.to_bytes();
+                                      
+                                      if let Err(e) = injector.inject(&bytes, &regs) {
+                                           eprintln!("Injection failed: {}", e);
+                                           // If injection fails, we just continue with original syscall
+                                      } else {
+                                           println!("[Bridge] Injection successful.");
+                                           sniffer::print_hexdump("INJECTED", &bytes);
+                                           // After injection, we are at restored entry state.
+                                           // We must NOT check rx again immediately to avoid loop, 
+                                           // and we should proceed to handle the original syscall entry below.
+                                      }
+                                  } else {
+                                       eprintln!("Failed to get regs for injection");
+                                  }
+                             }
+                        }
+                    }
+
                     if let Ok(regs) = get_regs(pid) {
                         let sys_nr = regs.regs[8];
                         let arg_fd = regs.regs[0];
