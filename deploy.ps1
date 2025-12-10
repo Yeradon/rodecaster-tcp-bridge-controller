@@ -23,9 +23,9 @@ ssh $RemoteHost "pkill tcp-bridge || true"
 scp -O `
     ./tcp-bridge/target/$Target/release/tcp-bridge `
     ./tcp-bridge/target/$Target/release/bridge-ctl `
-    ./run-sniffer.sh `
-    ./run-proxy.sh `
-    ./test_mappings.sh `
+    ./scripts/run-sniffer.sh `
+    ./scripts/run-proxy.sh `
+    ./scripts/test_mappings.sh `
     "$($RemoteHost):/tmp/"
 ssh $RemoteHost "chmod +x $RemotePath /tmp/bridge-ctl /tmp/run-sniffer.sh /tmp/tcp-bridge /tmp/run-proxy.sh /tmp/test_mappings.sh"
 
