@@ -71,7 +71,81 @@ The protocol is binary with a fixed header structure.
 *   **12-15**: Virtual (Game, Music, A, B)
 *   **16**: CallMe 1
 
-## 4. Helper Tools
+## 4. Mix Link/Unlink Commands
+
+Commands for controlling source linking in output mixes (Headphones, USB, etc.).
+
+### Prefix Calculation
+The prefix byte is calculated using a matrix formula:
+```
+prefix = source_index * 13 + mix_index
+```
+
+### Mix Commands
+
+#### 1. Mix Link Request
+*   **Command**: `"mixLinkRequest\0"`
+*   **Prefix**: Calculated from formula
+*   **Payload**: `01 07 08 01 01 02 01 01 02` (fixed values)
+
+#### 2. Mix Unlink Request
+*   **Command**: `"mixUnlinkRequest\0"`
+*   **Prefix**: Calculated from formula
+*   **Payload**: Same as Link
+
+#### 3. Mix Disabled
+*   **Command**: `"mixDisabled\0"`
+*   **Prefix**: Calculated from formula
+*   **Payload**: `01 01 <state>` (02=active, 03=disabled)
+
+### Mix Indices (Output Buses) - Complete Mapping
+| Index | Output |
+| :--- | :--- |
+| **10** | Headphone 1 |
+| **11** | Headphone 2 |
+| **12** | Headphone 3 |
+| **13** | Headphone 4 |
+| **14** | Speaker |
+| **15** | Recording |
+| **16** | Bluetooth |
+| **17** | USB 1 |
+| **18** | Chat |
+| **19** | USB 2 |
+| **20** | CallMe 1 |
+| **21** | CallMe 2 |
+| **22** | CallMe 3 |
+
+### Source Indices (for Mix Commands) - Complete Mapping
+| Index | Source |
+| :--- | :--- |
+| **4** | Combo 1 |
+| **5** | Combo 2 |
+| **6** | Combo 3 |
+| **7** | Combo 4 |
+| **8** | Combo 1+2 (Stereo) |
+| **9** | Combo 2+3 (Stereo) |
+| **10** | Combo 3+4 (Stereo) |
+| **11** | USB 1 |
+| **12** | Chat/CallMe |
+| **13** | USB 2 |
+| **14** | Bluetooth |
+| **15** | SoundPad |
+
+### CallMe Sources (Special Encoding)
+CallMe sources use a different packet structure:
+*   **Session ID**: `01 01 01 02` (hardcoded, different from regular `01 01 01 01`)
+*   **Prefix**: 2 bytes instead of 1
+    *   First byte: `4 + mix_index`
+    *   Second byte: `callme_index` (1, 2, or 3)
+*   **Packet size**: 40 bytes (vs 39 for regular sources)
+
+**Example:** CallMe 1 in HP1 (mix 10): prefix = `0e 01` (14, 1)
+
+## 5. Helper Tools
 *   **`tcp-bridge`**: The main proxy binary.
-*   **`bridge-ctl`**: CLI tool (`mute`, `source`, `level`, `mic_type`).
+*   **`bridge-ctl`**: CLI tool with commands:
+    *   `mute`, `source`, `level`, `mic-type`, `touch`
+    *   `mix-link`, `mix-unlink`, `mix-disable`
+    *   `call-me-link`, `call-me-unlink`
 *   **`run-proxy.sh`**: Startup script (sets up IP alias, iptables, starts bridge).
+

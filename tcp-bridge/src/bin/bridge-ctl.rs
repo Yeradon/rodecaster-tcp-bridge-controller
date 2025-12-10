@@ -33,6 +33,45 @@ enum Commands {
     },
     /// Simulate a screen touch
     Touch,
+    /// Link a source in a mix output
+    /// Formula: prefix = source_index*13 + mix_index
+    /// Known: Bluetooth=14, HP1=10, HP2=11
+    MixLink {
+        /// Mix index (HP1=10, HP2=11)
+        mix_index: u8,
+        /// Source index (Bluetooth=14, USB1=11, etc.)
+        source_index: u8,
+    },
+    /// Unlink a source from a mix output
+    MixUnlink {
+        /// Mix index (HP1=10, HP2=11)
+        mix_index: u8,
+        /// Source index
+        source_index: u8,
+    },
+    /// Disable a source in a mix (mutes audio)
+    MixDisable {
+        /// Mix index
+        mix_index: u8,
+        /// Source index
+        source_index: u8,
+        /// State: 2=active, 3=disabled
+        state: u8,
+    },
+    /// Link a CallMe source (special 2-byte prefix encoding)
+    CallMeLink {
+        /// Mix index (HP1=10, HP2=11, etc.)
+        mix_index: u8,
+        /// CallMe index (1, 2, or 3)
+        callme_index: u8,
+    },
+    /// Unlink a CallMe source
+    CallMeUnlink {
+        /// Mix index (HP1=10, HP2=11, etc.)
+        mix_index: u8,
+        /// CallMe index (1, 2, or 3)
+        callme_index: u8,
+    },
 }
 
 #[tokio::main]
@@ -48,6 +87,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::MicType { fader_index, val } => format!("mic_type {} {}", fader_index, val),
         Commands::Level { fader_index, val } => format!("level {} {}", fader_index, val),
         Commands::Touch => "touch".to_string(),
+        Commands::MixLink { mix_index, source_index } => format!("mix_link {} {}", mix_index, source_index),
+        Commands::MixUnlink { mix_index, source_index } => format!("mix_unlink {} {}", mix_index, source_index),
+        Commands::MixDisable { mix_index, source_index, state } => format!("mix_disable {} {} {}", mix_index, source_index, state),
+        Commands::CallMeLink { mix_index, callme_index } => format!("callme_link {} {}", mix_index, callme_index),
+        Commands::CallMeUnlink { mix_index, callme_index } => format!("callme_unlink {} {}", mix_index, callme_index),
     };
 
     stream.write_all(cmd_str.as_bytes()).await?;

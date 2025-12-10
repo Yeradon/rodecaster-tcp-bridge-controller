@@ -9,6 +9,11 @@ pub enum Command {
     InputMicrophoneType { fader_index: u8, mic_type: u32 },
     FaderLevel { fader_index: u8, level: u32 },
     ScreenTouched,
+    MixLink { mix_index: u8, source_index: u8 },
+    MixUnlink { mix_index: u8, source_index: u8 },
+    MixDisable { mix_index: u8, source_index: u8, state: u8 },
+    CallMeLink { mix_index: u8, callme_index: u8 },
+    CallMeUnlink { mix_index: u8, callme_index: u8 },
 }
 
 pub async fn start_listener(tx: broadcast::Sender<Command>) {
@@ -67,6 +72,37 @@ fn parse_command(input: &str) -> Option<Command> {
             Some(Command::FaderLevel { fader_index: fader, level: val })
         },
         "touch" => Some(Command::ScreenTouched),
+        "mix_link" => {
+            if parts.len() < 3 { return None; }
+            let mix_index = parts[1].parse::<u8>().ok()?;
+            let source_index = parts[2].parse::<u8>().ok()?;
+            Some(Command::MixLink { mix_index, source_index })
+        },
+        "mix_unlink" => {
+            if parts.len() < 3 { return None; }
+            let mix_index = parts[1].parse::<u8>().ok()?;
+            let source_index = parts[2].parse::<u8>().ok()?;
+            Some(Command::MixUnlink { mix_index, source_index })
+        },
+        "mix_disable" => {
+            if parts.len() < 4 { return None; }
+            let mix_index = parts[1].parse::<u8>().ok()?;
+            let source_index = parts[2].parse::<u8>().ok()?;
+            let state = parts[3].parse::<u8>().ok()?;
+            Some(Command::MixDisable { mix_index, source_index, state })
+        },
+        "callme_link" => {
+            if parts.len() < 3 { return None; }
+            let mix_index = parts[1].parse::<u8>().ok()?;
+            let callme_index = parts[2].parse::<u8>().ok()?;
+            Some(Command::CallMeLink { mix_index, callme_index })
+        },
+        "callme_unlink" => {
+            if parts.len() < 3 { return None; }
+            let mix_index = parts[1].parse::<u8>().ok()?;
+            let callme_index = parts[2].parse::<u8>().ok()?;
+            Some(Command::CallMeUnlink { mix_index, callme_index })
+        },
         _ => None,
     }
 }
@@ -92,6 +128,26 @@ impl crate::protocol::RodeCommand for Command {
             },
             Command::ScreenTouched => {
                 let cmd = crate::protocol::ScreenTouched;
+                crate::protocol::RodeCommand::build_payload(&cmd, session_id)
+            },
+            Command::MixLink { mix_index, source_index } => {
+                let cmd = crate::protocol::MixLinkRequest { mix_index: *mix_index, source_index: *source_index };
+                crate::protocol::RodeCommand::build_payload(&cmd, session_id)
+            },
+            Command::MixUnlink { mix_index, source_index } => {
+                let cmd = crate::protocol::MixUnlinkRequest { mix_index: *mix_index, source_index: *source_index };
+                crate::protocol::RodeCommand::build_payload(&cmd, session_id)
+            },
+            Command::MixDisable { mix_index, source_index, state } => {
+                let cmd = crate::protocol::MixDisabled { mix_index: *mix_index, source_index: *source_index, state: *state };
+                crate::protocol::RodeCommand::build_payload(&cmd, session_id)
+            },
+            Command::CallMeLink { mix_index, callme_index } => {
+                let cmd = crate::protocol::CallMeLinkRequest { mix_index: *mix_index, callme_index: *callme_index };
+                crate::protocol::RodeCommand::build_payload(&cmd, session_id)
+            },
+            Command::CallMeUnlink { mix_index, callme_index } => {
+                let cmd = crate::protocol::CallMeUnlinkRequest { mix_index: *mix_index, callme_index: *callme_index };
                 crate::protocol::RodeCommand::build_payload(&cmd, session_id)
             },
         }

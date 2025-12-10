@@ -5,11 +5,13 @@ pub mod mute;
 pub mod source;
 pub mod level;
 pub mod touch;
+pub mod mix;
 
 pub use mute::*;
 pub use source::*;
 pub use level::*;
 pub use touch::*;
+pub use mix::*;
 
 #[derive(Debug, Clone)]
 pub struct Packet {
