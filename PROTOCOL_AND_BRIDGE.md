@@ -1,84 +1,77 @@
 # Rodecaster Pro II: Protocol & Bridge Documentation
 
 ## Overview
-This project successfully reverse-engineered the internal communication channel between the **UI** (`rc_gui_juce`) and the **Audio Engine** (`rc_audio_mixer`) on the Rodecaster Pro II. By injecting packets into this channel, we can programmatically control faders, mutes, and other mixer functions.
+This project provides a complete solution for programmatic control of the Rodecaster Pro II. It uses a **TCP Proxy** to intercept and inject commands into the internal communication channel between the UI (`rc_gui_juce`) and the Audio Engine (`rc_audio_mixer`), enabling features like Fader Mute, Input Source Selection, and Level Control, with full UI synchronization.
 
-## 1. The Protocol
-The communication happens over a Unix Domain Socket pair (FD 10 in `rc_gui_juce`). The protocol is binary with a fixed header.
+## 1. Architecture: TCP Proxy
+The communication occurs over a TCP connection on `127.0.0.1:2345`.
+We replace this with a Proxy:
+1.  **Intercept**: The Proxy binds to `127.0.0.2:9000` and uses `iptables` (DNAT) to redirect traffic destined for `127.0.0.1:2345` to itself.
+2.  **Forward**: It connects to the real Server (`127.0.0.1:2345`) and bridges the traffic.
+3.  **Inject**: It listens on a Unix Socket (`/tmp/socket_bridge_control`) for external commands (from `bridge-ctl`) and injects them into the stream.
+4.  **Loopback**: To keep the UI in sync, injected commands are sent BOTH to the Server (to affect Audio) and back to the Client (to update the UI).
+
+## 2. The Protocol
+The protocol is binary with a fixed header structure.
 
 ### Packet Structure
-`[Header: 4B] [Length: 4B] [Payload: Variable]`
+`[Header: 4B] [Length: 4B] [SessionID: 4B] [Index: 1B] [CommandStr] [Type: 1B] [Count: 1B] [Value]`
 
-*   **Magic Header**: `0xF2B49E2C` (Little Endian)
-*   **Command Prefix**: `01 01 01 01` (Standard for control commands)
+*   **Magic Header**: `0xF2B49E2C` (Little Endian: `2C 9E B4 F2`)
+*   **Length**: Payload length (excluding Header/Length).
+*   **Session ID**: 4 Bytes, dynamic (Sniffed from Client traffic).
+*   **Index**: The target Fader ID + Base Offset.
 
-### Protocol Discovery
+### Commands
 
-#### Protocol : Virtual Faders (1-3)
-Used for the virtual sliders. The **Channel ID** is embedded in the *command string prefix*.
-*   **Structure**: `[Prefix] [FaderID_Char] "channelOutputMute\0" [Type] [Val] [Action]`
-*   **Fader IDs** (Prefix Character):
-    *   Fader 1: `"` (0x22)
-    *   Fader 2: `#` (0x23)
-    *   Fader 3: `$` (0x24)
-*   **Action** (Last Byte):
-    *   Mute: `0x02`
-    *   Unmute: `0x03`
+#### 1. Channel Output Mute
+*   **Command**: `"channelOutputMute\0"`
+*   **Base Offset**: `0x1C`
+*   **Type**: `0x01`
+*   **Value**: `0x01`
+*   **Action**: `0x02` (Mute), `0x03` (Unmute)
 
+#### 2. Channel Input Source
+*   **Command**: `"channelInputSource\0"`
+*   **Base Offset**: `0x1C`
+*   **Type**: `0x05`
+*   **Value**: `u32` (Source ID)
+*   **Note**: Changing Source often requires a `inputMicrophoneType` sequence (`-1` then `4`) to prevent UI corruption.
 
----
+#### 3. Fader Level
+*   **Command**: `"faderLevel\0"`
+*   **Base Offset**: `0x04`
+*   **Type**: `0x05`
+*   **Value**: `u32` (Level)
+*   **Note**: Works for **Virtual Faders** only. Physical faders are read-only via this protocol.
 
-## 2. The Socket Bridge (`socket-bridge`)
-To inject these packets, we built a Rust tool that uses `ptrace` to intercept the target process (`rc_gui_juce`). It logs all the messages using formatted hex output and interprets known commands and formats them in a human-readable way.
+## 3. Mappings
 
-### Robustness Features
-*   **Safe Injection Point**: The bridge verifies that the instruction at `PC-4` is `SVC` (Syscall) before injecting. This prevents memory corruption by ensuring we only inject when the process is waiting at a syscall boundary.
-*   **Clean Detach**: To prevent the "Zombie Freeze" (where the UI hangs after the tool exits), we use a strict sequence:
-    1.  `SIGSTOP` all threads.
-    2.  Wait for stop.
-    3.  `ptrace::detach`.
-    4.  `SIGCONT` all threads.
+### Fader Indices
+| Index | Type     | Protocol ID (Mute/Source) | Protocol ID (Level) |
+| :--- | :--- | :--- | :--- |
+| **0** | Physical 1 | `0x1C` | `0x04` |
+| **1** | Physical 2 | `0x1D` | `0x05` |
+| **2** | Physical 3 | `0x1E` | `0x06` |
+| **3** | Physical 4 | `0x1F` | `0x07` |
+| **4** | Physical 5 | `0x20` | `0x08` |
+| **5** | Physical 6 | `0x21` | `0x09` |
+| **6** | Virtual 1  | `0x22` | `0x0A` |
+| **7** | Virtual 2  | `0x23` | `0x0B` |
+| **8** | Virtual 3  | `0x24` | `0x0C` |
 
-### Test Bridge (`test_bridge`)
-A simple tool to inject packets into the socket bridge. It supports known commands in a human-readable way and a raw command to inject hex data.
+### Source IDs
+*   **0-3**: Combo 1-4 (Mono)
+*   **4-6**: Combo Stereo Pairs (1+2, 2+3, 3+4)
+*   **7**: USB 1
+*   **8**: USB 1 Chat
+*   **9**: USB 2
+*   **10**: Bluetooth
+*   **11**: Soundpad
+*   **12-15**: Virtual (Game, Music, A, B)
+*   **16**: CallMe 1
 
-### Run Script (`run-bridge.sh`)
-A simple script to run the bridge.
-
-
-### Deployment Script (`deploy.ps1`)
-A simple script to build and upload the bridge to the device.
----
-
-## 3. UI Synchronization
-Injecting the *Output* command (`channelOutputMute`) mutes the audio but leaves the UI showing "Unmuted". This is a "Split Brain" state.
-
-**Solution**:
-No soloution found yet
-
-## 4. Usage
-
-### Deployment
-Use the provided PowerShell script to build and upload:
-```powershell
-.\deploy.ps1
-```
-
-### Running the Bridge
-On the device:
-```bash
-/tmp/run-bridge.sh
-```
-
-### Controlling (Examples)
-From the device (or via UDP from PC):
-
-**Mute Fader 1 (Physical):**
-```bash
-/tmp/test_bridge physical 22 1
-```
-
-**Simulate Touch (UI Sync):**
-```bash
-/tmp/test_bridge raw 2c9eb4f216000000010101010773637265656e546f756368656400010102
-```
+## 4. Helper Tools
+*   **`tcp-bridge`**: The main proxy binary.
+*   **`bridge-ctl`**: CLI tool (`mute`, `source`, `level`, `mic_type`).
+*   **`run-proxy.sh`**: Startup script (sets up IP alias, iptables, starts bridge).

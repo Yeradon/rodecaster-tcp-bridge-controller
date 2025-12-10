@@ -1,0 +1,23 @@
+# Rust
+target/
+**/target/
+
+# IDEs
+.vscode/
+.idea/
+*.iml
+
+# Logs and Captures
+*.log
+*.txt
+*.pcap
+*.pcapng
+
+# System
+.DS_Store
+Thumbs.db
+
+# Build Artifacts (if any outside target)
+*.o
+*.a
+*.so

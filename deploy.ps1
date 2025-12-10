@@ -5,20 +5,28 @@ $RemoteHost = "root@192.168.7.22"
 $RemotePath = "/tmp/socket-bridge"
 $LocalBin = ".\socket-bridge\target\$Target\release\socket-bridge"
 
-Write-Host "Building for $Target..."
-Push-Location socket-bridge
-# You might need 'cross' if you don't have the target installed directly
-# cargo build --release --target $Target
+# Build tcp-bridge (includes bridge-ctl)
+Write-Host "Building tcp-bridge and bridge-ctl..."
+Push-Location "tcp-bridge"
 cross build --release --target $Target
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Build failed"
+    exit 1
 }
 Pop-Location
 
 Write-Host "Deploying to $RemoteHost..."
-# Added -v for verbose to debug
-scp -v socket-bridge/target/$Target/release/socket-bridge $RemoteHost`:$RemotePath
-scp -v socket-bridge/target/$Target/release/bridge-ctl $RemoteHost`:/tmp/bridge-ctl
-ssh $RemoteHost "chmod +x $RemotePath /tmp/bridge-ctl"
+# Kill existing instance to release file lock
+ssh $RemoteHost "pkill tcp-bridge || true"
+
+# Deploy
+scp -O `
+    ./tcp-bridge/target/$Target/release/tcp-bridge `
+    ./tcp-bridge/target/$Target/release/bridge-ctl `
+    ./run-sniffer.sh `
+    ./run-proxy.sh `
+    ./test_mappings.sh `
+    "$($RemoteHost):/tmp/"
+ssh $RemoteHost "chmod +x $RemotePath /tmp/bridge-ctl /tmp/run-sniffer.sh /tmp/tcp-bridge /tmp/run-proxy.sh /tmp/test_mappings.sh"
 
 Write-Host "Done."

@@ -1,26 +1,32 @@
-use libc::pid_t;
-use std::collections::HashMap;
-
-pub fn print_hexdump(prefix: &str, data: &[u8]) {
-    println!("{} ({} bytes):", prefix, data.len());
-    let width = 16;
-    for (i, chunk) in data.chunks(width).enumerate() {
-        print!("{:08x}  ", i * width);
-        for (j, b) in chunk.iter().enumerate() {
+pub fn print_hexdump(label: &str, data: &[u8]) {
+    println!("{}: ({} bytes)", label, data.len());
+    let len = data.len();
+    let display_len = if len > 128 { 128 } else { len };
+    
+    for (i, chunk) in data[..display_len].chunks(16).enumerate() {
+        print!("{:08x}  ", i * 16);
+        for b in chunk {
             print!("{:02x} ", b);
-            if j == 7 { print!(" "); }
         }
-        if chunk.len() < width {
-            let missing = width - chunk.len();
-            let spaces = missing * 3 + (if chunk.len() <= 8 { 1 } else { 0 });
-            for _ in 0..spaces { print!(" "); }
+        // Padding for last line
+        if chunk.len() < 16 {
+            for _ in 0..(16 - chunk.len()) {
+                print!("   ");
+            }
         }
         print!(" |");
         for b in chunk {
-            if *b >= 32 && *b <= 126 { print!("{}", *b as char); }
-            else { print!("."); }
+            let c = *b as char;
+            if c.is_ascii_graphic() || c == ' ' {
+                print!("{}", c);
+            } else {
+                print!(".");
+            }
         }
         println!("|");
+    }
+    if len > 128 {
+        println!("... ({} bytes truncated)", len - 128);
     }
     println!();
 }
