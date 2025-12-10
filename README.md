@@ -4,9 +4,9 @@ This project enables programmatic control of the **Rodecaster Pro II** by interc
 
 ## Features
 
-*   **Fader Control**: Mut/Unmute any physical or virtual fader.
+*   **Fader Control**: Mute/Unmute any virtual fader.
 *   **Source Routing**: Change input sources (e.g., assign "Soundpad" to Fader 1) on the fly.
-*   **Virtual Levels**: Adjust volume for virtual channels (Game, Music, Chat).
+*   **Virtual Levels**: Adjust volume for virtual faders.
 *   **UI Synchronization**: Uses a "Loopback Injection" technique to ensure the Rodecaster's touchscreen updates instantly to reflect your changes.
 
 ## Components
@@ -70,5 +70,3 @@ Open a second SSH terminal (or use `socat` from scripts) to control the device u
 ## Documentation
 
 For a deep dive into the reverse-engineered protocol, packet structures, and mapping tables, see [PROTOCOL_AND_BRIDGE.md](PROTOCOL_AND_BRIDGE.md).
-
-For a step-by-step walkthrough of the project history and findings, see the [Walkthrough Artifact](walkthrough.md) (if generated).
