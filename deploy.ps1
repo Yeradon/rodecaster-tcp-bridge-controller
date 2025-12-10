@@ -5,8 +5,8 @@ $RemoteHost = "root@192.168.7.22"
 $RemotePath = "/tmp/socket-bridge"
 $LocalBin = ".\socket-bridge\target\$Target\release\socket-bridge"
 
-# Build tcp-bridge (includes bridge-ctl)
-Write-Host "Building tcp-bridge and bridge-ctl..."
+# Build tcp-bridge (includes bridge-ctl and api-server)
+Write-Host "Building tcp-bridge, bridge-ctl, and api-server..."
 Push-Location "tcp-bridge"
 cross build --release --target $Target
 if ($LASTEXITCODE -ne 0) {
@@ -16,17 +16,19 @@ if ($LASTEXITCODE -ne 0) {
 Pop-Location
 
 Write-Host "Deploying to $RemoteHost..."
-# Kill existing instance to release file lock
-ssh $RemoteHost "pkill tcp-bridge || true"
+# Kill existing instances to release file lock
+ssh $RemoteHost "pkill tcp-bridge || true; pkill api-server || true"
 
 # Deploy
 scp -O `
     ./tcp-bridge/target/$Target/release/tcp-bridge `
     ./tcp-bridge/target/$Target/release/bridge-ctl `
+    ./tcp-bridge/target/$Target/release/api-server `
     ./scripts/run-sniffer.sh `
     ./scripts/run-proxy.sh `
     ./scripts/test_mappings.sh `
+    ./scripts/run-api.sh `
     "$($RemoteHost):/tmp/"
-ssh $RemoteHost "chmod +x $RemotePath /tmp/bridge-ctl /tmp/run-sniffer.sh /tmp/tcp-bridge /tmp/run-proxy.sh /tmp/test_mappings.sh"
+ssh $RemoteHost "chmod +x  /tmp/bridge-ctl /tmp/api-server /tmp/run-sniffer.sh /tmp/tcp-bridge /tmp/run-proxy.sh /tmp/test_mappings.sh /tmp/run-api.sh"
 
 Write-Host "Done."
