@@ -1,0 +1,60 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+  TARGET: aarch64-unknown-linux-musl
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+        contents: write
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.TARGET }}
+
+      - name: Install Cross
+        run: cargo install cross
+
+      - name: Build TCP Bridge & Bridge CTL
+        run: |
+          cd tcp-bridge
+          cross build --release --target ${{ env.TARGET }}
+
+      - name: Prepare Release Artifacts
+        run: |
+          mkdir release
+          # Copy Binaries
+          cp tcp-bridge/target/${{ env.TARGET }}/release/tcp-bridge release/
+          cp tcp-bridge/target/${{ env.TARGET }}/release/bridge-ctl release/
+          
+          # Copy Scripts
+          cp -r scripts release/
+          cp deploy.sh release/
+
+      - name: Create Tarball
+        run: |
+          tar -czvf rodecaster-bridge-release.tar.gz -C release .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rodecaster-bridge-release
+          path: rodecaster-bridge-release.tar.gz
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: rodecaster-bridge-release.tar.gz
