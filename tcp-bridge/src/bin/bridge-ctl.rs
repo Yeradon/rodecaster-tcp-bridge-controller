@@ -1,77 +1,66 @@
-use clap::{Parser, Subcommand};
+//! CLI for controlling the Rodecaster via the proxy.
+//! Uses human-readable names and unified commands.
+
+use clap::{Parser, Subcommand, ValueEnum};
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
+use serde_json;
+
+use tcp_bridge::commands::{Command, MixAction};
+use tcp_bridge::names::{MixOutput, Source, Fader};
 
 #[derive(Parser, Debug)]
-#[command(author, version, about)]
+#[command(author, version, about = "Rodecaster CLI control")]
 struct Args {
     #[command(subcommand)]
     command: Commands,
 }
 
+#[derive(ValueEnum, Clone, Debug)]
+enum CliMixAction {
+    Link,
+    Unlink,
+    Disable,
+}
+
+impl From<CliMixAction> for MixAction {
+    fn from(a: CliMixAction) -> Self {
+        match a {
+            CliMixAction::Link => MixAction::Link,
+            CliMixAction::Unlink => MixAction::Unlink,
+            CliMixAction::Disable => MixAction::Disable,
+        }
+    }
+}
+
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Mute or Unmute a channel (0=Unmute, 1=Mute)
+    /// Mix routing: link/unlink/disable/enable sources
+    /// Example: mix link hp1 bluetooth
+    Mix {
+        /// Action: link, unlink, disable, enable
+        action: CliMixAction,
+        /// Mix output (hp1-4, speaker, recording, bt, usb1, usb2, chat, cm1-3)
+        mix: String,
+        /// Source (combo1-4, combo12/23/34, usb1/2, bt, pad, game, music, va, vb, cm1-3)
+        source: String,
+    },
+    /// Mute/unmute a fader
     Mute {
-        fader_index: u8,
+        /// Fader (p1-6, v1-3)
+        fader: String,
+        /// 0=unmute, 1=mute
         state: u8,
     },
-    /// Set the input source for a channel
-    Source {
-        fader_index: u8,
-        source_id: u32,
-    },
-    /// Set microphone type (Advanced)
-    MicType {
-        fader_index: u8,
-        val: i64,
-    },
-    /// Set fader level (Virtual Only)
+    /// Set fader level (0-65535)
     Level {
-        fader_index: u8,
-        val: u32,
+        /// Fader (p1-6, v1-3)
+        fader: String,
+        /// Level value
+        level: u32,
     },
-    /// Simulate a screen touch
+    /// Simulate screen touch
     Touch,
-    /// Link a source in a mix output
-    /// Formula: prefix = source_index*13 + mix_index
-    /// Known: Bluetooth=14, HP1=10, HP2=11
-    MixLink {
-        /// Mix index (HP1=10, HP2=11)
-        mix_index: u8,
-        /// Source index (Bluetooth=14, USB1=11, etc.)
-        source_index: u8,
-    },
-    /// Unlink a source from a mix output
-    MixUnlink {
-        /// Mix index (HP1=10, HP2=11)
-        mix_index: u8,
-        /// Source index
-        source_index: u8,
-    },
-    /// Disable a source in a mix (mutes audio)
-    MixDisable {
-        /// Mix index
-        mix_index: u8,
-        /// Source index
-        source_index: u8,
-        /// State: 2=active, 3=disabled
-        state: u8,
-    },
-    /// Link a CallMe source (special 2-byte prefix encoding)
-    CallMeLink {
-        /// Mix index (HP1=10, HP2=11, etc.)
-        mix_index: u8,
-        /// CallMe index (1, 2, or 3)
-        callme_index: u8,
-    },
-    /// Unlink a CallMe source
-    CallMeUnlink {
-        /// Mix index (HP1=10, HP2=11, etc.)
-        mix_index: u8,
-        /// CallMe index (1, 2, or 3)
-        callme_index: u8,
-    },
 }
 
 #[tokio::main]
@@ -79,23 +68,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let socket_path = "/tmp/socket_bridge_control";
 
-    let mut stream = UnixStream::connect(socket_path).await?;
-
-    let cmd_str = match args.command {
-        Commands::Mute { fader_index, state } => format!("mute {} {}", fader_index, state),
-        Commands::Source { fader_index, source_id } => format!("source {} {}", fader_index, source_id),
-        Commands::MicType { fader_index, val } => format!("mic_type {} {}", fader_index, val),
-        Commands::Level { fader_index, val } => format!("level {} {}", fader_index, val),
-        Commands::Touch => "touch".to_string(),
-        Commands::MixLink { mix_index, source_index } => format!("mix_link {} {}", mix_index, source_index),
-        Commands::MixUnlink { mix_index, source_index } => format!("mix_unlink {} {}", mix_index, source_index),
-        Commands::MixDisable { mix_index, source_index, state } => format!("mix_disable {} {} {}", mix_index, source_index, state),
-        Commands::CallMeLink { mix_index, callme_index } => format!("callme_link {} {}", mix_index, callme_index),
-        Commands::CallMeUnlink { mix_index, callme_index } => format!("callme_unlink {} {}", mix_index, callme_index),
+    let cmd = match args.command {
+        Commands::Mix { action, mix, source } => {
+            let mix_output: MixOutput = mix.parse()
+                .map_err(|e| format!("Invalid mix: {}", e))?;
+            let src: Source = source.parse()
+                .map_err(|e| format!("Invalid source: {}", e))?;
+            Command::Mix { action: action.into(), mix: mix_output, source: src }
+        }
+        Commands::Mute { fader, state } => {
+            let f: Fader = fader.parse()
+                .map_err(|e| format!("Invalid fader: {}", e))?;
+            Command::Fader { fader: f, muted: Some(state != 0), source: None, level: None }
+        }
+        Commands::Level { fader, level } => {
+            let f: Fader = fader.parse()
+                .map_err(|e| format!("Invalid fader: {}", e))?;
+            Command::Fader { fader: f, muted: None, source: None, level: Some(level as f32 / 65535.0) }
+        }
+        Commands::Touch => Command::Touch,
     };
 
-    stream.write_all(cmd_str.as_bytes()).await?;
-    println!("Sent: {}", cmd_str);
-
+    let json = serde_json::to_string(&cmd)?;
+    
+    let mut stream = UnixStream::connect(socket_path).await?;
+    stream.write_all(json.as_bytes()).await?;
+    
+    println!("Sent: {}", json);
     Ok(())
 }

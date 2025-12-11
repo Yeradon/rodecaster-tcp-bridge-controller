@@ -96,7 +96,13 @@ prefix = source_index * 13 + mix_index
 #### 3. Mix Disabled
 *   **Command**: `"mixDisabled\0"`
 *   **Prefix**: Calculated from formula
-*   **Payload**: `01 01 <state>` (02=active, 03=disabled)
+*   **Payload**: `01 01 <state>` (02=disabled, 03=active)
+*   **Note**: Link command automatically sends enable before link
+
+### Mix States
+1. **Linked** = Follows fader level
+2. **Unlinked** = Fixed audio level  
+3. **Disabled** = No output
 
 ### Mix Indices (Output Buses) - Complete Mapping
 | Index | Output |
@@ -130,6 +136,10 @@ prefix = source_index * 13 + mix_index
 | **13** | USB 2 |
 | **14** | Bluetooth |
 | **15** | SoundPad |
+| **16** | Virtual Game |
+| **17** | Virtual Music |
+| **18** | Virtual A |
+| **19** | Virtual B |
 
 ### CallMe Sources (Special Encoding)
 CallMe sources use a different packet structure:
@@ -143,9 +153,11 @@ CallMe sources use a different packet structure:
 
 ## 5. Helper Tools
 *   **`tcp-bridge`**: The main proxy binary.
-*   **`bridge-ctl`**: CLI tool with commands:
-    *   `mute`, `source`, `level`, `mic-type`, `touch`
-    *   `mix-link`, `mix-unlink`, `mix-disable`
-    *   `call-me-link`, `call-me-unlink`
+*   **`bridge-ctl`**: CLI tool with unified commands:
+    *   `mix <link|unlink|disable> <mix> <source>` - Mix routing
+    *   `mute <fader> <0|1>` - Fader mute
+    *   `level <fader> <value>` - Fader level
+    *   `touch` - Screen touch
+*   **`api-server`**: HTTP REST API (port 8080)
 *   **`run-proxy.sh`**: Startup script (sets up IP alias, iptables, starts bridge).
 

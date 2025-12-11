@@ -1,7 +1,8 @@
-mod protocol;
 mod listener;
 mod sniffer;
-pub mod names;
+
+// Re-export from library
+pub use tcp_bridge::{names, protocol, commands};
 
 use clap::Parser;
 use std::net::SocketAddr;
@@ -103,31 +104,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                 }
                                 Ok(cmd) = cmd_rx.recv() => {
-                                    // Inject Command!
-                                    // Simplified Dispatch thanks to RodeCommand implementation
+                                    // Inject Command(s)!
                                     println!("[Proxy] Injecting Command: {:?}", cmd);
-                                    let payload = protocol::RodeCommand::build_payload(&cmd, &current_session_id);
+                                    let payloads = cmd.build_payloads(&current_session_id);
                                     
-                                    // UI SYNC: Loopback injection (Unified for all commands now)
-                                    // We derived the payload above, now we packetize and queue it
-                                    let packet = protocol::Packet::new(payload.clone());
-                                    let bytes = packet.to_bytes();
-                                    if let Err(e) = inject_tx.send(bytes).await {
-                                         eprintln!("Failed to queue UI Sync: {}", e);
-                                    } else {
-                                         println!("[Proxy] Queued UI Sync (S->C)");
+                                    for (i, payload) in payloads.iter().enumerate() {
+                                        // Rate limit: delay between multi-packet commands
+                                        if i > 0 {
+                                            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                                        }
+                                        
+                                        // UI SYNC: Loopback injection
+                                        let packet = protocol::Packet::new(payload.clone());
+                                        let bytes = packet.to_bytes();
+                                        if let Err(e) = inject_tx.send(bytes.clone()).await {
+                                             eprintln!("Failed to queue UI Sync: {}", e);
+                                        }
+                                        
+                                        sniffer::print_hexdump("INJECTED", &bytes);
+                                        
+                                        if let Err(e) = server_writer.write_all(&bytes).await {
+                                            eprintln!("Failed to inject command: {}", e);
+                                        }
                                     }
-                                    
-                                    let packet = protocol::Packet::new(payload);
-                                    let bytes = packet.to_bytes();
-                                    
-                                    sniffer::print_hexdump("INJECTED", &bytes);
-                                    
-                                    if let Err(e) = server_writer.write_all(&bytes).await {
-                                        eprintln!("Failed to inject command: {}", e);
-                                    } else {
-                                        println!("[Proxy] Injection Sent.");
-                                    }
+                                    println!("[Proxy] Injection Sent ({} packets).", payloads.len());
                                 }
                             }
                         }
